@@ -1,6 +1,8 @@
 #!/bin/bash
 # Скрипт установки Log Viewer на RedOS 8.0.3
-# Поддерживает установку как с интернетом, так и без (офлайн)
+# Поддерживает:
+#   - Установку из директории разработки (копирование в /opt/log-viewer)
+#   - Запуск на месте (если уже распаковано в /opt/log-viewer)
 # Запуск: sudo bash install.sh
 
 set -e
@@ -23,29 +25,62 @@ fi
 
 # Определяем директорию где лежит скрипт
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-echo "Исходная директория: $SCRIPT_DIR"
+echo "Директория скрипта: $SCRIPT_DIR"
+echo "Директория установки: $APP_DIR"
+
+# Определяем режим работы
+if [ "$SCRIPT_DIR" = "$APP_DIR" ]; then
+    INSTALL_MODE="inplace"
+    echo "Режим: установка на месте (файлы уже в $APP_DIR)"
+else
+    INSTALL_MODE="copy"
+    echo "Режим: копирование из $SCRIPT_DIR в $APP_DIR"
+fi
+
+# Функция проверки наличия файла в зависимости от режима
+check_file() {
+    local file=$1
+    if [ "$INSTALL_MODE" = "inplace" ]; then
+        [ -f "$APP_DIR/$file" ]
+    else
+        [ -f "$SCRIPT_DIR/$file" ]
+    fi
+}
+
+check_dir() {
+    local dir=$1
+    if [ "$INSTALL_MODE" = "inplace" ]; then
+        [ -d "$APP_DIR/$dir" ]
+    else
+        [ -d "$SCRIPT_DIR/$dir" ]
+    fi
+}
 
 # Проверяем наличие необходимых файлов
-if [ ! -f "$SCRIPT_DIR/package.json" ]; then
-    echo "Ошибка: package.json не найден в $SCRIPT_DIR"
-    echo "Убедитесь что скрипт запускается из директории проекта"
+if ! check_file "package.json"; then
+    echo "Ошибка: package.json не найден"
+    if [ "$INSTALL_MODE" = "inplace" ]; then
+        echo "Файл должен быть в $APP_DIR/package.json"
+    else
+        echo "Файл должен быть в $SCRIPT_DIR/package.json"
+    fi
     exit 1
 fi
 
-if [ ! -f "$SCRIPT_DIR/server.js" ]; then
-    echo "Ошибка: server.js не найден в $SCRIPT_DIR"
+if ! check_file "server.js"; then
+    echo "Ошибка: server.js не найден"
     exit 1
 fi
 
-if [ ! -d "$SCRIPT_DIR/dist" ]; then
-    echo "Ошибка: Директория dist не найдена в $SCRIPT_DIR"
+if ! check_dir "dist"; then
+    echo "Ошибка: Директория dist не найдена"
     echo "Сначала выполните: npm run build"
     exit 1
 fi
 
 # 1. Проверка Node.js
 echo ""
-echo "[1/8] Проверка Node.js..."
+echo "[1/7] Проверка Node.js..."
 if ! command -v node &> /dev/null; then
     echo "Node.js не найден."
     echo ""
@@ -64,15 +99,15 @@ echo "npm версия: $(npm --version)"
 
 # 2. Создание директорий
 echo ""
-echo "[2/8] Создание директорий..."
+echo "[2/7] Создание директорий..."
 mkdir -p "$APP_DIR"
 mkdir -p "$LOG_DIR"
-echo "Создана директория: $APP_DIR"
-echo "Создана директория: $LOG_DIR"
+echo "Директория приложения: $APP_DIR"
+echo "Директория логов: $LOG_DIR"
 
 # 3. Создание пользователя
 echo ""
-echo "[3/8] Создание системного пользователя..."
+echo "[3/7] Создание системного пользователя..."
 if ! id "$APP_USER" &>/dev/null; then
     useradd -r -s /bin/false "$APP_USER"
     echo "Пользователь $APP_USER создан"
@@ -80,52 +115,55 @@ else
     echo "Пользователь $APP_USER уже существует"
 fi
 
-# 4. Копирование файлов
+# 4. Копирование файлов (только если режим copy)
 echo ""
-echo "[4/8] Копирование файлов..."
-echo "Копируем из $SCRIPT_DIR в $APP_DIR"
+echo "[4/7] Подготовка файлов..."
+if [ "$INSTALL_MODE" = "copy" ]; then
+    echo "Копируем из $SCRIPT_DIR в $APP_DIR"
 
-# Копируем основные файлы
-cp -v "$SCRIPT_DIR/package.json" "$APP_DIR/"
-cp -v "$SCRIPT_DIR/server.js" "$APP_DIR/"
-cp -v "$SCRIPT_DIR/config.json" "$APP_DIR/"
+    # Копируем основные файлы (без ошибки если файл тот же)
+    for file in package.json server.js config.json; do
+        if [ -f "$SCRIPT_DIR/$file" ]; then
+            cp -v "$SCRIPT_DIR/$file" "$APP_DIR/"
+        fi
+    done
 
-# Копируем собранный фронтенд
-cp -rv "$SCRIPT_DIR/dist" "$APP_DIR/"
+    # Копируем собранный фронтенд
+    cp -rv "$SCRIPT_DIR/dist" "$APP_DIR/"
 
-# Копируем node_modules если есть
-if [ -d "$SCRIPT_DIR/node_modules" ]; then
-    echo "Копируем node_modules..."
-    cp -r "$SCRIPT_DIR/node_modules" "$APP_DIR/"
-    NODE_MODULES_COPIED=true
+    # Копируем node_modules если есть
+    if [ -d "$SCRIPT_DIR/node_modules" ]; then
+        echo "Копируем node_modules..."
+        cp -r "$SCRIPT_DIR/node_modules" "$APP_DIR/"
+    fi
+
+    # Копируем README
+    if [ -f "$SCRIPT_DIR/README.md" ]; then
+        cp -v "$SCRIPT_DIR/README.md" "$APP_DIR/"
+    fi
+
+    echo "Файлы скопированы успешно"
 else
-    NODE_MODULES_COPIED=false
+    echo "Файлы уже на месте (режим inplace)"
 fi
 
-# Копируем README
-if [ -f "$SCRIPT_DIR/README.md" ]; then
-    cp -v "$SCRIPT_DIR/README.md" "$APP_DIR/"
-fi
-
-echo "Файлы скопированы успешно"
-
-# 5. Установка зависимостей
-echo ""
-echo "[5/8] Установка зависимостей..."
+# Переходим в директорию приложения
 cd "$APP_DIR"
-echo "Перешли в директорию: $(pwd)"
+echo "Рабочая директория: $(pwd)"
 
-# Проверяем что мы в правильной директории
+# Проверяем что package.json на месте
 if [ ! -f "package.json" ]; then
     echo "КРИТИЧЕСКАЯ ОШИБКА: package.json не найден в $APP_DIR"
+    echo "Восстановите файл из архива или создайте заново"
     exit 1
 fi
 
-# Проверяем есть ли уже node_modules
-if [ "$NODE_MODULES_COPIED" = true ]; then
-    echo "✅ node_modules уже скопированы, пропускаем установку"
-elif [ -d "node_modules" ]; then
-    echo "✅ node_modules уже существуют, пропускаем установку"
+# 5. Установка зависимостей
+echo ""
+echo "[5/7] Проверка зависимостей..."
+
+if [ -d "node_modules" ] && [ -d "node_modules/express" ]; then
+    echo "✅ node_modules уже установлены, пропускаем"
 else
     echo "Пытаемся установить зависимости..."
     
@@ -134,7 +172,7 @@ else
         echo "Интернет доступен, устанавливаем зависимости..."
         npm install --omit=dev
     else
-        echo "⚠️ Интернет недоступен!"
+        echo "⚠️ Интернет недоступен и node_modules отсутствуют!"
         echo ""
         echo "Для установки зависимостей БЕЗ интернета:"
         echo ""
@@ -148,15 +186,10 @@ else
         echo "    cd $APP_DIR"
         echo "    tar -xzf node_modules.tar.gz"
         echo ""
-        echo "Вариант 2: Используйте npm pack"
+        echo "Вариант 2: Используйте prepare-offline.sh"
         echo "  На машине с интернетом:"
-        echo "    npm pack --pack-destination ./packages/"
-        echo "    tar -czf offline-packages.tar.gz packages/"
-        echo ""
-        echo "  На сервере:"
-        echo "    cd $APP_DIR"
-        echo "    tar -xzf offline-packages.tar.gz"
-        echo "    npm install --offline ./packages/*.tgz"
+        echo "    bash prepare-offline.sh"
+        echo "  Скопируйте log-viewer-offline.tar.gz на сервер"
         echo ""
         exit 1
     fi
@@ -164,7 +197,7 @@ fi
 
 # 6. Настройка прав
 echo ""
-echo "[6/8] Настройка прав доступа..."
+echo "[6/7] Настройка прав доступа..."
 chown -R "$APP_USER":"$APP_USER" "$APP_DIR"
 
 # Добавляем пользователя в группу jenkins для чтения логов
@@ -183,7 +216,12 @@ fi
 
 # 7. Создание systemd-сервиса
 echo ""
-echo "[7/8] Создание systemd-сервиса..."
+echo "[7/7] Создание systemd-сервиса..."
+
+# Проверяем что node существует по указанному пути
+NODE_PATH=$(which node)
+echo "Путь к Node.js: $NODE_PATH"
+
 cat > /etc/systemd/system/${APP_NAME}.service << EOF
 [Unit]
 Description=Log Viewer Web Service
@@ -194,7 +232,7 @@ Type=simple
 User=${APP_USER}
 Group=${APP_USER}
 WorkingDirectory=${APP_DIR}
-ExecStart=/usr/bin/node server.js
+ExecStart=${NODE_PATH} server.js
 Restart=always
 RestartSec=10
 StandardOutput=journal
@@ -210,9 +248,9 @@ EOF
 
 echo "Systemd сервис создан: /etc/systemd/system/${APP_NAME}.service"
 
-# 8. Настройка firewall
+# Настройка firewall
 echo ""
-echo "[8/8] Настройка firewall..."
+echo "Настройка firewall..."
 if command -v firewall-cmd &> /dev/null; then
     firewall-cmd --permanent --add-port=${PORT}/tcp 2>/dev/null || true
     firewall-cmd --reload 2>/dev/null || true
@@ -221,12 +259,12 @@ else
     echo "firewalld не найден, пропускаем"
 fi
 
-# 9. Запуск сервиса
+# Запуск сервиса
 echo ""
 echo "Запуск сервиса..."
 systemctl daemon-reload
 systemctl enable ${APP_NAME}
-systemctl start ${APP_NAME}
+systemctl restart ${APP_NAME}
 
 # Ждём 2 секунды и проверяем статус
 sleep 2

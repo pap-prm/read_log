@@ -2,7 +2,6 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { LogViewer } from './components/LogViewer';
 import { FileList } from './components/FileList';
 import { Header } from './components/Header';
-import { StatsPanel } from './components/StatsPanel';
 import { FilterBar } from './components/FilterBar';
 
 export interface LogFile {
@@ -159,8 +158,6 @@ function App() {
               ⚠️ {error}
             </div>
           )}
-
-          {stats && <StatsPanel stats={stats} />}
 
           <FilterBar
             search={search}

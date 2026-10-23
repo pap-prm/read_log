@@ -199,8 +199,8 @@ app.get('/api/logs/:filename/stats', (req, res) => {
   }
 });
 
-// SPA fallback
-app.get('*', (req, res) => {
+// SPA fallback (совместимо с Express 5.x)
+app.use((req, res) => {
   res.sendFile(path.join(__dirname, 'dist', 'index.html'));
 });
 

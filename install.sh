@@ -195,9 +195,43 @@ else
     fi
 fi
 
-# 6. Настройка прав
+# 6. Генерация SSL-сертификатов
 echo ""
-echo "[6/7] Настройка прав доступа..."
+echo "[6/8] Генерация SSL-сертификатов..."
+
+CERT_DIR="$APP_DIR/certs"
+if [ -f "$CERT_DIR/cert.pem" ] && [ -f "$CERT_DIR/key.pem" ]; then
+    echo "✅ SSL-сертификаты уже существуют, пропускаем"
+else
+    echo "Создание самоподписанного сертификата..."
+    mkdir -p "$CERT_DIR"
+    
+    # Получаем hostname и IP
+    CERT_DOMAIN=$(hostname)
+    CERT_IP=$(hostname -I | awk '{print $1}')
+    
+    openssl req -x509 -newkey rsa:4096 \
+        -keyout "$CERT_DIR/key.pem" \
+        -out "$CERT_DIR/cert.pem" \
+        -sha256 \
+        -days 365 \
+        -nodes \
+        -subj "/C=RU/ST=Local/L=Local/O=LogViewer/CN=$CERT_DOMAIN" \
+        -addext "subjectAltName=DNS:$CERT_DOMAIN,IP:$CERT_IP,IP:127.0.0.1" \
+        2>/dev/null
+    
+    chmod 600 "$CERT_DIR/key.pem"
+    chmod 644 "$CERT_DIR/cert.pem"
+    
+    echo "✅ SSL-сертификаты созданы"
+    echo "   Домен: $CERT_DOMAIN"
+    echo "   IP: $CERT_IP"
+    echo "   Срок: 365 дней"
+fi
+
+# 7. Настройка прав
+echo ""
+echo "[7/8] Настройка прав доступа..."
 chown -R "$APP_USER":"$APP_USER" "$APP_DIR"
 
 # Добавляем пользователя в группу jenkins для чтения логов
@@ -214,9 +248,9 @@ if [ -d "$LOG_DIR" ]; then
     echo "Права на чтение логов настроены"
 fi
 
-# 7. Создание systemd-сервиса
+# 8. Создание systemd-сервиса
 echo ""
-echo "[7/7] Создание systemd-сервиса..."
+echo "[8/8] Создание systemd-сервиса..."
 
 # Проверяем что node существует по указанному пути
 NODE_PATH=$(which node)
@@ -253,8 +287,9 @@ echo ""
 echo "Настройка firewall..."
 if command -v firewall-cmd &> /dev/null; then
     firewall-cmd --permanent --add-port=${PORT}/tcp 2>/dev/null || true
+    firewall-cmd --permanent --add-port=5556/tcp 2>/dev/null || true
     firewall-cmd --reload 2>/dev/null || true
-    echo "Порт ${PORT} открыт в firewall"
+    echo "Порты ${PORT} (HTTP) и 5556 (HTTPS) открыты в firewall"
 else
     echo "firewalld не найден, пропускаем"
 fi
@@ -280,7 +315,8 @@ echo "=========================================="
 echo "  ✅ Установка завершена!"
 echo "=========================================="
 echo ""
-echo "  Сервис доступен: http://$(hostname -I | awk '{print $1}'):${PORT}"
+echo "  🌐 HTTP:  http://$(hostname -I | awk '{print $1}'):${PORT}"
+echo "  🔒 HTTPS: https://$(hostname -I | awk '{print $1}'):5556"
 echo "  Папка логов: ${LOG_DIR}"
 echo "  Конфиг: ${APP_DIR}/config.json"
 echo ""

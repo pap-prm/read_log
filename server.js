@@ -1,6 +1,8 @@
 import express from 'express';
 import fs from 'fs';
 import path from 'path';
+import https from 'https';
+import http from 'http';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -11,6 +13,8 @@ const config = JSON.parse(fs.readFileSync(path.join(__dirname, 'config.json'), '
 
 const app = express();
 const PORT = config.port || 5555;
+const HTTPS_PORT = config.https?.port || 5556;
+const HTTP_REDIRECT = config.https?.httpRedirect !== false;
 
 // Middleware для проверки whitelist IP
 function checkWhitelist(req, res, next) {
@@ -212,13 +216,81 @@ function formatBytes(bytes) {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
 
-app.listen(PORT, '0.0.0.0', () => {
+// ============================================
+// Запуск серверов
+// ============================================
+
+function printStartupInfo() {
   console.log(`===========================================`);
-  console.log(`  Log Viewer запущен на порту ${PORT}`);
+  console.log(`  Log Viewer`);
   console.log(`  Папка логов: ${config.logDirectory}`);
   console.log(`  Whitelist IP: ${config.whitelist.enabled ? 'ВКЛЮЧЁН' : 'ВЫКЛЮЧЕН'}`);
   if (config.whitelist.enabled) {
     console.log(`  Разрешённые IP: ${config.whitelist.ips.join(', ')}`);
   }
   console.log(`===========================================`);
-});
+}
+
+// HTTPS сервер
+if (config.https?.enabled) {
+  const certPath = config.https.cert || path.join(__dirname, 'certs', 'cert.pem');
+  const keyPath = config.https.key || path.join(__dirname, 'certs', 'key.pem');
+  const caPath = config.https.ca;
+
+  try {
+    if (!fs.existsSync(certPath) || !fs.existsSync(keyPath)) {
+      console.error(`❌ SSL сертификаты не найдены!`);
+      console.error(`   Ожидается: ${certPath}`);
+      console.error(`   и: ${keyPath}`);
+      console.error(``);
+      console.error(`   Создайте самоподписанный сертификат:`);
+      console.error(`   mkdir -p certs`);
+      console.error(`   openssl req -x509 -newkey rsa:4096 -keyout certs/key.pem -out certs/cert.pem \\`);
+      console.error(`     -sha256 -days 365 -nodes \\`);
+      console.error(`     -subj "/C=RU/ST=Local/L=Local/O=LogViewer/CN=$(hostname)"`);
+      process.exit(1);
+    }
+
+    const sslOptions = {
+      cert: fs.readFileSync(certPath),
+      key: fs.readFileSync(keyPath),
+    };
+
+    if (caPath && fs.existsSync(caPath)) {
+      sslOptions.ca = fs.readFileSync(caPath);
+    }
+
+    const httpsServer = https.createServer(sslOptions, app);
+    httpsServer.listen(HTTPS_PORT, '0.0.0.0', () => {
+      console.log(`  🔒 HTTPS: https://0.0.0.0:${HTTPS_PORT}`);
+    });
+
+    // HTTP → HTTPS redirect
+    if (HTTP_REDIRECT) {
+      const redirectApp = express();
+      redirectApp.use((req, res) => {
+        const host = req.headers.host?.replace(/:\d+$/, '') || 'localhost';
+        res.redirect(301, `https://${host}:${HTTPS_PORT}${req.url}`);
+      });
+      http.createServer(redirectApp).listen(PORT, '0.0.0.0', () => {
+        console.log(`  🔄 HTTP→HTTPS: http://0.0.0.0:${PORT} → https://...${HTTPS_PORT}`);
+      });
+    } else {
+      // Без редиректа — просто отдаём на HTTP
+      http.createServer(app).listen(PORT, '0.0.0.0', () => {
+        console.log(`  🌐 HTTP: http://0.0.0.0:${PORT}`);
+      });
+    }
+
+    printStartupInfo();
+  } catch (err) {
+    console.error(`❌ Ошибка запуска HTTPS: ${err.message}`);
+    process.exit(1);
+  }
+} else {
+  // Только HTTP
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`  🌐 HTTP: http://0.0.0.0:${PORT}`);
+    printStartupInfo();
+  });
+}

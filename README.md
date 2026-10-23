@@ -11,6 +11,7 @@
 - 📈 Статистика по лог-файлу (количество ошибок, предупреждений и т.д.)
 - 🔄 Авто-обновление каждые 5 секунд
 - 🔒 Контроль доступа по белому списку IP (одиночные адреса и CIDR-диапазоны)
+- 🔐 HTTPS с самоподписанным сертификатом + редирект HTTP → HTTPS
 - 📄 Постраничная навигация (1000 строк на страницу)
 - 🐧 Поддержка формата Java-логов (log4j, logback)
 
@@ -85,6 +86,14 @@ ls -la /opt/log-viewer/
   "port": 5555,
   "logDirectory": "/opt/assembly_visual/logs/",
   "logFilePattern": "*.log",
+  "https": {
+    "enabled": true,
+    "port": 5556,
+    "cert": "/opt/log-viewer/certs/cert.pem",
+    "key": "/opt/log-viewer/certs/key.pem",
+    "ca": "",
+    "httpRedirect": true
+  },
   "whitelist": {
     "enabled": true,
     "ips": [
@@ -100,12 +109,60 @@ ls -la /opt/log-viewer/
 ```
 
 **Параметры:**
-- `port` — порт, на котором будет работать сервис (5555)
-- `logDirectory` — путь к папке с логами (из какой папки читать логи)
+- `port` — HTTP порт (5555), при включённом HTTPS используется для редиректа
+- `logDirectory` — путь к папке с логами
+- `https.enabled` — включить HTTPS
+- `https.port` — порт HTTPS (5556)
+- `https.cert` — путь к SSL-сертификату
+- `https.key` — путь к SSL-ключу
+- `https.ca` — путь к CA-сертификату (опционально)
+- `https.httpRedirect` — редирект HTTP → HTTPS (true/false)
 - `whitelist.enabled` — включить/выключить проверку IP
 - `whitelist.ips` — список разрешённых IP:
   - Одиночные адреса: `"192.168.1.100"`
   - Диапазоны (CIDR): `"192.168.1.0/24"`, `"10.0.0.0/8"`
+
+### 3.1. Генерация SSL-сертификатов
+
+При установке самоподписанный сертификат создаётся автоматически. Для ручной генерации:
+
+```bash
+# Автоматическая генерация
+cd /opt/log-viewer
+sudo bash generate-certs.sh
+
+# Или вручную с указанием домена/IP
+sudo bash generate-certs.sh myserver.company.loc
+
+# Перезапуск сервиса
+sudo systemctl restart log-viewer
+```
+
+**Использование своего сертификата (например, от корпоративного CA):**
+
+```bash
+# Скопируйте сертификаты в директорию
+sudo cp my-cert.pem /opt/log-viewer/certs/cert.pem
+sudo cp my-key.pem /opt/log-viewer/certs/key.pem
+sudo cp ca-cert.pem /opt/log-viewer/certs/ca.pem  # если есть
+
+# Укажите пути в config.json
+sudo nano /opt/log-viewer/config.json
+# Измените https.cert, https.key, https.ca
+
+# Перезапуск
+sudo systemctl restart log-viewer
+```
+
+**Отключение HTTPS:**
+
+```json
+{
+  "https": {
+    "enabled": false
+  }
+}
+```
 
 ### 4. Настройка прав доступа
 

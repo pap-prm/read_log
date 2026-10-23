@@ -57,6 +57,9 @@ cp server.js "$PACKAGE_DIR/"
 cp config.json "$PACKAGE_DIR/"
 cp README.md "$PACKAGE_DIR/" 2>/dev/null || true
 cp install.sh "$PACKAGE_DIR/"
+cp generate-certs.sh "$PACKAGE_DIR/" 2>/dev/null || true
+cp prepare-offline.sh "$PACKAGE_DIR/" 2>/dev/null || true
+cp OFFLINE-INSTALL.md "$PACKAGE_DIR/" 2>/dev/null || true
 
 # Копируем node_modules
 echo "Копируем node_modules (это может занять время)..."

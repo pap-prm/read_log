@@ -1,5 +1,6 @@
 #!/bin/bash
 # Скрипт установки Log Viewer на RedOS 8.0.3
+# Поддерживает установку как с интернетом, так и без (офлайн)
 # Запуск: sudo bash install.sh
 
 set -e
@@ -42,16 +43,21 @@ if [ ! -d "$SCRIPT_DIR/dist" ]; then
     exit 1
 fi
 
-# 1. Установка Node.js
+# 1. Проверка Node.js
 echo ""
-echo "[1/8] Установка Node.js..."
+echo "[1/8] Проверка Node.js..."
 if ! command -v node &> /dev/null; then
-    echo "Node.js не найден. Устанавливаем..."
-    dnf install -y nodejs npm || {
-        echo "Node.js не найден в репозиториях. Устанавливаем через NodeSource..."
-        curl -fsSL https://rpm.nodesource.com/setup_20.x | bash -
-        dnf install -y nodejs
-    }
+    echo "Node.js не найден."
+    echo ""
+    echo "Для установки Node.js БЕЗ интернета:"
+    echo "  1. Скачайте бинарники на машине с интернетом:"
+    echo "     wget https://nodejs.org/dist/v20.11.0/node-v20.11.0-linux-x64.tar.xz"
+    echo "  2. Скопируйте на сервер и распакуйте:"
+    echo "     tar -xf node-v20.11.0-linux-x64.tar.xz -C /usr/local --strip-components=1"
+    echo ""
+    echo "Или установите из репозитория RedOS:"
+    echo "  sudo dnf install nodejs npm"
+    exit 1
 fi
 echo "Node.js версия: $(node --version)"
 echo "npm версия: $(npm --version)"
@@ -91,6 +97,9 @@ cp -rv "$SCRIPT_DIR/dist" "$APP_DIR/"
 if [ -d "$SCRIPT_DIR/node_modules" ]; then
     echo "Копируем node_modules..."
     cp -r "$SCRIPT_DIR/node_modules" "$APP_DIR/"
+    NODE_MODULES_COPIED=true
+else
+    NODE_MODULES_COPIED=false
 fi
 
 # Копируем README
@@ -112,8 +121,46 @@ if [ ! -f "package.json" ]; then
     exit 1
 fi
 
-# Устанавливаем зависимости
-npm install --omit=dev
+# Проверяем есть ли уже node_modules
+if [ "$NODE_MODULES_COPIED" = true ]; then
+    echo "✅ node_modules уже скопированы, пропускаем установку"
+elif [ -d "node_modules" ]; then
+    echo "✅ node_modules уже существуют, пропускаем установку"
+else
+    echo "Пытаемся установить зависимости..."
+    
+    # Проверяем доступ к интернету
+    if npm ping &> /dev/null; then
+        echo "Интернет доступен, устанавливаем зависимости..."
+        npm install --omit=dev
+    else
+        echo "⚠️ Интернет недоступен!"
+        echo ""
+        echo "Для установки зависимостей БЕЗ интернета:"
+        echo ""
+        echo "Вариант 1: Скопируйте node_modules с другой машины"
+        echo "  На машине с интернетом:"
+        echo "    cd /path/to/project"
+        echo "    npm install"
+        echo "    tar -czf node_modules.tar.gz node_modules/"
+        echo ""
+        echo "  Скопируйте на сервер и распакуйте:"
+        echo "    cd $APP_DIR"
+        echo "    tar -xzf node_modules.tar.gz"
+        echo ""
+        echo "Вариант 2: Используйте npm pack"
+        echo "  На машине с интернетом:"
+        echo "    npm pack --pack-destination ./packages/"
+        echo "    tar -czf offline-packages.tar.gz packages/"
+        echo ""
+        echo "  На сервере:"
+        echo "    cd $APP_DIR"
+        echo "    tar -xzf offline-packages.tar.gz"
+        echo "    npm install --offline ./packages/*.tgz"
+        echo ""
+        exit 1
+    fi
+fi
 
 # 6. Настройка прав
 echo ""

@@ -42,21 +42,38 @@ sudo dnf install -y nodejs
 
 ### 2. Развёртывание приложения
 
+#### Вариант А: Автоматическая установка (рекомендуется)
+
 ```bash
-# Создание директории
+# Перейти в директорию проекта
+cd /path/to/project
+
+# Собрать фронтенд
+npm install
+npm run build
+
+# Запустить установку
+sudo bash install.sh
+```
+
+#### Вариант Б: Ручная установка
+
+```bash
+# 1. Создание директории
 sudo mkdir -p /opt/log-viewer
+
+# 2. Копирование файлов проекта
+cd /path/to/project
+sudo cp package.json server.js config.json /opt/log-viewer/
+sudo cp -r dist /opt/log-viewer/
+
+# 3. Установка зависимостей (ВАЖНО: сначала перейти в директорию!)
 cd /opt/log-viewer
+sudo npm install --omit=dev
 
-# Копирование файлов проекта
-# (скопируйте файлы из архива или git clone)
-sudo cp -r /path/to/project/* /opt/log-viewer/
-
-# Установка зависимостей
-cd /opt/log-viewer
-sudo npm install
-
-# Сборка фронтенда
-sudo npm run build
+# 4. Проверка что всё на месте
+ls -la /opt/log-viewer/
+# Должны быть: package.json, server.js, config.json, dist/, node_modules/
 ```
 
 ### 3. Настройка конфигурации
@@ -264,17 +281,69 @@ sudo systemctl start log-viewer
 
 ## Устранение неполадок
 
+### Ошибка: `Could not read package.json`
+
+**Причина:** `npm install` запускается не из директории проекта.
+
+**Решение:**
 ```bash
-# Сервис не запускается
+# Обязательно перейдите в директорию перед npm install
+cd /opt/log-viewer
+ls -la   # убедитесь что package.json на месте
+npm install --omit=dev
+```
+
+### Ошибка: `EACCES: permission denied`
+
+**Причина:** Недостаточно прав для чтения логов.
+
+**Решение:**
+```bash
+# Добавить пользователя в группу jenkins
+sudo usermod -a -G jenkins logviewer
+
+# Дать права на чтение
+sudo chmod -R g+r /opt/assembly_visual/logs/
+
+# Перезапустить сервис
+sudo systemctl restart log-viewer
+```
+
+### Сервис не запускается
+
+```bash
+# Проверить статус
+sudo systemctl status log-viewer
+
+# Посмотреть логи
 sudo journalctl -u log-viewer --no-pager -n 50
 
-# Порт занят
+# Проверить что порт свободен
 sudo ss -tlnp | grep 5555
+```
 
-# Нет доступа к логам
+### Firewall блокирует
+
+```bash
+# Открыть порт
+sudo firewall-cmd --permanent --add-port=5555/tcp
+sudo firewall-cmd --reload
+
+# Проверить
+sudo firewall-cmd --list-ports
+```
+
+### Нет доступа к папке с логами
+
+```bash
+# Проверить что папка существует
 ls -la /opt/assembly_visual/logs/
-id logviewer
 
-# Firewall блокирует
-sudo firewall-cmd --list-all
+# Проверить права
+namei -l /opt/assembly_visual/logs/
+
+# Исправить права (если нужно)
+sudo chmod 755 /opt/assembly_visual
+sudo chmod 755 /opt/assembly_visual/logs
+sudo chmod 644 /opt/assembly_visual/logs/*.log
 ```

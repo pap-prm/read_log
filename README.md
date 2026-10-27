@@ -11,6 +11,7 @@
 - 📈 Статистика по лог-файлу (количество ошибок, предупреждений и т.д.)
 - 🔄 Авто-обновление каждые 5 секунд
 - 🔒 Контроль доступа по белому списку IP (одиночные адреса и CIDR-диапазоны)
+- 🔐 HTTPS с самоподписанным сертификатом + редирект HTTP → HTTPS
 - 📄 Постраничная навигация (1000 строк на страницу)
 - 🐧 Поддержка формата Java-логов (log4j, logback)
 
@@ -85,6 +86,14 @@ ls -la /opt/log-viewer/
   "port": 5555,
   "logDirectory": "/opt/assembly_visual/logs/",
   "logFilePattern": "*.log",
+  "https": {
+    "enabled": true,
+    "port": 5556,
+    "cert": "/opt/log-viewer/certs/cert.pem",
+    "key": "/opt/log-viewer/certs/key.pem",
+    "ca": "",
+    "httpRedirect": true
+  },
   "whitelist": {
     "enabled": true,
     "ips": [
@@ -100,12 +109,60 @@ ls -la /opt/log-viewer/
 ```
 
 **Параметры:**
-- `port` — порт, на котором будет работать сервис (5555)
-- `logDirectory` — путь к папке с логами (из какой папки читать логи)
+- `port` — HTTP порт (5555), при включённом HTTPS используется для редиректа
+- `logDirectory` — путь к папке с логами
+- `https.enabled` — включить HTTPS
+- `https.port` — порт HTTPS (5556)
+- `https.cert` — путь к SSL-сертификату
+- `https.key` — путь к SSL-ключу
+- `https.ca` — путь к CA-сертификату (опционально)
+- `https.httpRedirect` — редирект HTTP → HTTPS (true/false)
 - `whitelist.enabled` — включить/выключить проверку IP
 - `whitelist.ips` — список разрешённых IP:
   - Одиночные адреса: `"192.168.1.100"`
   - Диапазоны (CIDR): `"192.168.1.0/24"`, `"10.0.0.0/8"`
+
+### 3.1. Генерация SSL-сертификатов
+
+При установке самоподписанный сертификат создаётся автоматически. Для ручной генерации:
+
+```bash
+# Автоматическая генерация
+cd /opt/log-viewer
+sudo bash generate-certs.sh
+
+# Или вручную с указанием домена/IP
+sudo bash generate-certs.sh myserver.company.loc
+
+# Перезапуск сервиса
+sudo systemctl restart log-viewer
+```
+
+**Использование своего сертификата (например, от корпоративного CA):**
+
+```bash
+# Скопируйте сертификаты в директорию
+sudo cp my-cert.pem /opt/log-viewer/certs/cert.pem
+sudo cp my-key.pem /opt/log-viewer/certs/key.pem
+sudo cp ca-cert.pem /opt/log-viewer/certs/ca.pem  # если есть
+
+# Укажите пути в config.json
+sudo nano /opt/log-viewer/config.json
+# Измените https.cert, https.key, https.ca
+
+# Перезапуск
+sudo systemctl restart log-viewer
+```
+
+**Отключение HTTPS:**
+
+```json
+{
+  "https": {
+    "enabled": false
+  }
+}
+```
 
 ### 4. Настройка прав доступа
 
@@ -189,6 +246,112 @@ sudo firewall-cmd --list-ports
 
 ```
 http://<IP-сервера>:5555
+```
+
+---
+
+## Установка БЕЗ доступа в интернет (офлайн)
+
+### Шаг 1: Подготовка пакета на машине с интернетом
+
+```bash
+# На машине с интернетом, в директории проекта
+bash prepare-offline.sh
+```
+
+Скрипт создаст файл `log-viewer-offline.tar.gz` со всеми необходимыми файлами.
+
+### Шаг 2: Копирование на сервер без интернета
+
+```bash
+# Скопируйте архив на сервер любым способом:
+# Через SCP
+scp log-viewer-offline.tar.gz user@server:/tmp/
+
+# Через rsync
+rsync -avz log-viewer-offline.tar.gz user@server:/tmp/
+
+# Через USB-флешку
+cp log-viewer-offline.tar.gz /media/usb/
+```
+
+### Шаг 3: Установка на сервере
+
+```bash
+# На сервере без интернета
+cd /opt
+sudo tar -xzf /tmp/log-viewer-offline.tar.gz
+sudo mv log-viewer-offline log-viewer
+cd log-viewer
+sudo bash install.sh
+```
+
+### Альтернатива: Ручная установка без скрипта
+
+```bash
+# На сервере
+cd /opt
+sudo tar -xzf /tmp/log-viewer-offline.tar.gz
+sudo mv log-viewer-offline log-viewer
+cd log-viewer
+
+# Создание пользователя
+sudo useradd -r -s /bin/false logviewer
+sudo usermod -a -G jenkins logviewer
+
+# Настройка прав
+sudo chown -R logviewer:logviewer /opt/log-viewer
+sudo chmod -R g+r /opt/assembly_visual/logs/
+
+# Создание systemd-сервиса
+sudo tee /etc/systemd/system/log-viewer.service << 'EOF'
+[Unit]
+Description=Log Viewer Web Service
+After=network.target
+
+[Service]
+Type=simple
+User=logviewer
+Group=logviewer
+WorkingDirectory=/opt/log-viewer
+ExecStart=/usr/bin/node server.js
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/opt/log-viewer
+ReadOnlyPaths=/opt/assembly_visual/logs
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# Запуск
+sudo systemctl daemon-reload
+sudo systemctl enable log-viewer
+sudo systemctl start log-viewer
+
+# Открыть порт в firewall
+sudo firewall-cmd --permanent --add-port=5555/tcp
+sudo firewall-cmd --reload
+```
+
+### Установка Node.js без интернета
+
+Если на сервере нет Node.js:
+
+```bash
+# На машине с интернетом скачайте бинарники
+wget https://nodejs.org/dist/v20.11.0/node-v20.11.0-linux-x64.tar.xz
+
+# Скопируйте на сервер и распакуйте
+sudo tar -xf node-v20.11.0-linux-x64.tar.xz -C /usr/local --strip-components=1
+
+# Проверка
+node --version
+npm --version
 ```
 
 ---
